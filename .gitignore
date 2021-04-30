@@ -1,0 +1,8 @@
+*.png
+*.zip
+Data
+Model
+Results
+Submit
+__pycache__
+*.log
