@@ -44,6 +44,47 @@ class Net(torch.nn.Module):
         x = F.relu(self.fc6(features))
         return x, features
 
+class metric_Net(torch.nn.Module):
+    def __init__(self, data_dim, num_classes):
+        super(metric_Net, self).__init__()
+        self.fc1 = torch.nn.Linear(data_dim, 100)
+        self.dropout1 = torch.nn.Dropout(p=0.5)
+
+        self.fc2 = torch.nn.Linear(100, 1000)
+        self.dropout2 = torch.nn.Dropout(p=0.5)
+
+        self.fc3 = torch.nn.Linear(1000, 1000)
+        self.dropout3 = torch.nn.Dropout(p=0.5)
+
+        self.fc4 = torch.nn.Linear(1000, 100)
+        self.dropout4 = torch.nn.Dropout(p=0.25)
+
+        self.fc5 = torch.nn.Linear(100, 2)
+        self.dropout5 = torch.nn.Dropout(p=0.25)
+
+        self.fc6 = torch.nn.Linear(2, num_classes)
+ 
+    def forward(self, x):
+        # テンソルのリサイズ: (N, 1, 64, 64) -> (N, 64*64)
+        # x = x.view(-1, 64 * 64)
+        x = F.relu(self.fc1(x))
+        x = self.dropout1(x)
+
+        x = F.relu(self.fc2(x))
+        x = self.dropout2(x)
+
+        x = F.relu(self.fc3(x))
+        x = self.dropout3(x)
+
+        x = F.relu(self.fc4(x))
+        x = self.dropout4(x)
+
+        x = F.relu(self.fc5(x))
+        ip1 = self.dropout5(x)
+
+        x = F.relu(self.fc6(ip1))
+        return ip1, x
+
 class EarlyStopping:
     """earlystoppingクラス"""
 
@@ -86,53 +127,4 @@ class EarlyStopping:
         torch.save(model.state_dict(), self.path)  #ベストモデルを指定したpathに保存
         self.val_loss_min = val_loss  #その時のlossを記録する
 
-# class Feature_extractor(torch.nn.Module):
-#     def __init__(self, data_dim):
-#         super(Features, self).__init__()
-#         self.fc1 = torch.nn.Linear(data_dim, 100)
-#         self.dropout1 = torch.nn.Dropout(p=0.5)
 
-#         self.fc2 = torch.nn.Linear(100, 1000)
-#         self.dropout2 = torch.nn.Dropout(p=0.5)
-
-#         self.fc3 = torch.nn.Linear(1000, 1000)
-#         self.dropout3 = torch.nn.Dropout(p=0.5)
-
-#         self.fc4 = torch.nn.Linear(1000, 100)
- 
-#     def forward(self, x):
-#         # テンソルのリサイズ: (N, 1, 64, 64) -> (N, 64*64)
-#         # x = x.view(-1, 64 * 64)
-#         x = F.relu(self.fc1(x))
-#         x = self.dropout1(x)
-
-#         x = F.relu(self.fc2(x))
-#         x = self.dropout2(x)
-
-#         x = F.relu(self.fc3(x))
-#         x = self.dropout3(x)
-
-#         x = F.relu(self.fc4(x))
-#         return x
-
-# class Classifier(torch.nn.Module):
-#     def __init__(self, num_classes):
-#         super(Classifier, self).__init__()
-#         self.fc1 = torch.nn.Linear(100, 100)
-#         self.fc2 = torch.nn.Linear(100, num_classes)
- 
-#     def forward(self, x):
-#         x = F.relu(self.fc1(x))
-#         x = F.relu(self.fc2(x))
-#         return x 
-
-# class Compression(torch.nn.Module):
-#     def __init__(self, data_dim):
-#         super(Compression, self).__init__()
-#         self.fc1 = torch.nn.Linear(100, 100)
-#         self.fc2 = torch.nn.Linear(100, 2)
- 
-#     def forward(self, x):
-#         x = F.relu(self.fc1(x))
-#         x = F.relu(self.fc2(x))
-#         return nn.Tanh(x) 

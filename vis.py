@@ -87,7 +87,7 @@ def visualize(X, y):
     
 def visualize_with_model(model, X, y):
 
-    path = "Results/matsuda/model_on/"
+    path = "Results/dice/"
 
     # GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -118,15 +118,4 @@ def visualize_with_model(model, X, y):
     umap_X = umap.fit_transform(features)
     scatter_plot(umap_X, y, path, "umap")
     plt.close()
-
-    # umap_NN = umap.fit_transform(features)
-    # scatter_plot(umap_NN, y, "NN")
-
-    # umap_OUT = umap.fit_transform(outputs)
-    # scatter_plot(umap_OUT, y, "OUT")
-    
-
-
-
-
 
