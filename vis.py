@@ -54,8 +54,8 @@ def scatter_plot(X, y, path, name):
     for label in np.unique(y):
         
         # 8, 10はスキップ
-        # if label in [8, 10]:
-        #     continue
+        if label in [8, 10]:
+            continue
 
         plt.scatter(X[y == label, 0], X[y == label, 1], 
                     label=str(label), marker=".", color=cm.colors[label])
@@ -87,7 +87,7 @@ def visualize(X, y):
     
 def visualize_with_model(model, X, y):
 
-    path = "Results/dice/"
+    path = "Results/L2/"
 
     # GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")

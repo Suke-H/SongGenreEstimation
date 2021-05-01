@@ -4,8 +4,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class Net(torch.nn.Module):
-    def __init__(self, data_dim, num_classes):
+    def __init__(self, data_dim, num_classes, alpha=16):
         super(Net, self).__init__()
+        self.alpha = alpha
+
         self.fc1 = torch.nn.Linear(data_dim, 100)
         self.dropout1 = torch.nn.Dropout(p=0.5)
 
@@ -18,10 +20,10 @@ class Net(torch.nn.Module):
         self.fc4 = torch.nn.Linear(1000, 100)
         self.dropout4 = torch.nn.Dropout(p=0.25)
 
-        self.fc5 = torch.nn.Linear(100, 100)
+        self.fc5 = torch.nn.Linear(100, 20)
         self.dropout5 = torch.nn.Dropout(p=0.25)
 
-        self.fc6 = torch.nn.Linear(100, num_classes)
+        self.fc6 = torch.nn.Linear(20, num_classes)
  
     def forward(self, x):
         # テンソルのリサイズ: (N, 1, 64, 64) -> (N, 64*64)
@@ -39,51 +41,29 @@ class Net(torch.nn.Module):
         x = self.dropout4(x)
 
         x = F.relu(self.fc5(x))
-        features = self.dropout5(x)
+        x = self.dropout5(x)
 
-        x = F.relu(self.fc6(features))
-        return x, features
+        # L2softmax
+        l2 = torch.sqrt((x**2).sum()) 
+        feature = self.alpha * (x / l2)
 
-class metric_Net(torch.nn.Module):
-    def __init__(self, data_dim, num_classes):
-        super(metric_Net, self).__init__()
-        self.fc1 = torch.nn.Linear(data_dim, 100)
-        self.dropout1 = torch.nn.Dropout(p=0.5)
+        x = self.fc6(feature)
+        
+        return x, feature
+        # return x
 
-        self.fc2 = torch.nn.Linear(100, 1000)
-        self.dropout2 = torch.nn.Dropout(p=0.5)
+class L2ConstraintedNet(nn.Module):
+    def __init__(self, org_model, alpha=16, num_classes=1000):
+        super().__init__()
+        self.org_model = org_model
+        self.alpha = alpha
 
-        self.fc3 = torch.nn.Linear(1000, 1000)
-        self.dropout3 = torch.nn.Dropout(p=0.5)
-
-        self.fc4 = torch.nn.Linear(1000, 100)
-        self.dropout4 = torch.nn.Dropout(p=0.25)
-
-        self.fc5 = torch.nn.Linear(100, 2)
-        self.dropout5 = torch.nn.Dropout(p=0.25)
-
-        self.fc6 = torch.nn.Linear(2, num_classes)
- 
     def forward(self, x):
-        # テンソルのリサイズ: (N, 1, 64, 64) -> (N, 64*64)
-        # x = x.view(-1, 64 * 64)
-        x = F.relu(self.fc1(x))
-        x = self.dropout1(x)
-
-        x = F.relu(self.fc2(x))
-        x = self.dropout2(x)
-
-        x = F.relu(self.fc3(x))
-        x = self.dropout3(x)
-
-        x = F.relu(self.fc4(x))
-        x = self.dropout4(x)
-
-        x = F.relu(self.fc5(x))
-        ip1 = self.dropout5(x)
-
-        x = F.relu(self.fc6(ip1))
-        return ip1, x
+        x = self.org_model(x)
+        # モデルの出力をL2ノルムで割り、定数alpha倍する
+        l2 = torch.sqrt((x**2).sum()) # 基本的にこの行を追加しただけ
+        x = self.alpha * (x / l2)     # 基本的にこの行を追加しただけ
+        return x
 
 class EarlyStopping:
     """earlystoppingクラス"""
