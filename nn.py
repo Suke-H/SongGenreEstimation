@@ -5,12 +5,13 @@ import torch.utils.data as data
 
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, f1_score, confusion_matrix
+from sklearn.model_selection import StratifiedKFold
 import pandas as pd
 from tqdm import tqdm
 import pyarrow as pa
 
-from models import Net, EarlyStopping
-from vis import loss_plot, acc_plot, visualize, visualize_with_model
+from models import NN, L2Softmax, EarlyStopping_On_Loss
+from vis import loss_plot, acc_plot, visualize, visualize_with_model, visualize_with_model_list
 from loss import SelfAdjDiceLoss
 
 def mean_norm(df):
@@ -33,6 +34,19 @@ def preprocess(df_train):
 
     return X, y
 
+def preprocess_test(df_test):
+    """ 前処理  """
+
+    df = df_test.copy()
+
+    # データと正解ラベルを分割
+    X = df.drop(['index'], axis=1)
+
+    # 標準化
+    X = mean_norm(X)
+
+    return X.values.astype(np.float32)
+
 def make_dataloader(X, y, batch_size):
     """ Dataloader作成 """
 
@@ -50,31 +64,34 @@ def make_under_sampling_dataloader(X, y, batch_size):
     X_tmp, y_tmp = np.delete(X, delete_8, axis=0), np.delete(y, delete_8)
     X_tmp, y_tmp = np.delete(X_tmp, delete_10, axis=0), np.delete(y_tmp, delete_10)
 
-    # print("8:", len(delete_8), ", 10:", len(delete_10))
-    # print(X.shape, "->", X_tmp.shape)
-    # print(y.shape, "->", y_tmp.shape)
-
     dataset = data.TensorDataset(torch.from_numpy(X_tmp), torch.from_numpy(y_tmp))
     dataloader = data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
 
     return dataloader
 
-def calc_loo_cv_score(model, X, y):  # leave-one-out
+def calc_loo_cv_score(model, X, y=None):  # leave-one-out
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model, X = model.to(device), torch.from_numpy(X).to(device)
     model.eval() # 推論モードに
 
     outputs, _ = model(X)
     _, preds = torch.max(outputs, 1)
+    outputs = outputs.to('cpu').detach().numpy().copy()
     preds = preds.to('cpu').detach().numpy().copy()
 
-    score = f1_score(y, preds, average="macro")
-    print(f"f1_score={score}\n")
-    print(classification_report(y, preds))
-    cm = confusion_matrix(y, preds)
-    print(cm)
-    cm_sum = np.sum(cm, axis=1)
-    print(cm_sum)
+    # test
+    if y is None:
+        return outputs, preds
+
+    # train
+    else:
+        score = f1_score(y, preds, average="macro")
+        print(f"f1_score={score}\n")
+        print(classification_report(y, preds))
+        print(confusion_matrix(y, preds))
+
+        return outputs, preds, score
+    
 
 def train(model, X, y, optimizer, criterion, num_epochs, path):
     """ 学習 """
@@ -85,7 +102,7 @@ def train(model, X, y, optimizer, criterion, num_epochs, path):
     model.train() # 訓練モードに
 
     # earlystoppingインスタンス
-    earlystopping = EarlyStopping(patience=100, verbose=True, path=path)
+    earlystopping = EarlyStopping_On_Loss(patience=300, verbose=False, path=path)
 
     # lossやaccのプロット用
     history = {"loss": [], "acc": []}
@@ -94,8 +111,8 @@ def train(model, X, y, optimizer, criterion, num_epochs, path):
     for epoch in range(num_epochs):
 
         epoch_loss = epoch_corrects = total = 0
-        # dataloader = make_dataloader(X, y, 100)
-        dataloader = make_under_sampling_dataloader(X, y, 100)
+        dataloader = make_dataloader(X, y, 100)
+        # dataloader = make_under_sampling_dataloader(X, y, 100)
 
         # データローダーからミニバッチを取り出すループ
         for inputs, labels in dataloader:
@@ -106,13 +123,11 @@ def train(model, X, y, optimizer, criterion, num_epochs, path):
             optimizer.zero_grad()
 
             # 順伝搬（forward）計算
-            outputs, features = model(inputs)
+            outputs, feature = model(inputs)
 
             loss = criterion(outputs, labels)  # 損失を計算
             _, preds = torch.max(outputs, 1)  # ラベルを予測
 
-            # print(preds)
-            
             # 逆伝播（backward）計算
             loss.backward()
             optimizer.step()
@@ -148,60 +163,95 @@ def train(model, X, y, optimizer, criterion, num_epochs, path):
 
 if __name__ == '__main__':
 
-    #　読み込み
+    #　trainデータ読み込み
     datapath = "Data/"
     df_train = pd.read_csv(datapath+"train_m.csv")
-    df_test = pd.read_csv(datapath+"test_m.csv")
-
-    # 前処理
     X, y = preprocess(df_train)
-    # dataloader = make_dataloader(X, y, 100)
 
     # モデル呼び出し
     data_dim = X.shape[1]
     num_classes = 11
-    model = Net(data_dim, num_classes)
+    num_folds = 4
+    model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
+    # model_list = [NN(data_dim, num_classes) for i in range(num_folds)]
+    model_path_list = ['Model/NN/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
 
     # 最適アルゴリズム
     lr = 0.001
     beta1, beta2 = 0.0, 0.9
-    optimizer = torch.optim.Adam(model.parameters(), lr, [beta1, beta2])
+    optimizer_list = [torch.optim.Adam(model_list[i].parameters(), lr, [beta1, beta2]) for i in range(num_folds)]
 
     # 損失関数
     criterion = nn.CrossEntropyLoss(reduction='mean')
     # criterion = SelfAdjDiceLoss()
 
     # 学習回数
-    num_epochs = 10000
+    num_epochs = 100000
 
-    # earlystopping用のmodel保存先
-    model_path = 'Model/NN/NLL.pth'
+    ### 学習（StratifiedKFoldを使用）#################################
+    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    oof = np.zeros(len(y))
+    f1_list = np.zeros(num_folds)
 
-    # 学習
-    # train(model, dataloader, optimizer, criterion, num_epochs, model_path)
-    train(model, X, y, optimizer, criterion, num_epochs, model_path)
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+        print(f"------------------------------ fold {fold} ------------------------------")
+
+        X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
+
+        # 学習
+        train(model_list[fold], X_train, y_train, optimizer_list[fold], criterion, num_epochs, model_path_list[fold])
+
+        # 各foldのvalidationデータの推定結果を合体させて、最終出力とする
+        # oof[indexes_val] = model.predict(df_val, num_iteration=prediction_round)
+        _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+
+    print("CV: {}".format(np.mean(f1_list)))
+
+    ####################################################
 
     # モデル呼び出し
-    # model_path = 'Model/NN/1.pth'
-    model.load_state_dict(torch.load(model_path))
+    for i in range(num_folds):
+        model_list[i].load_state_dict(torch.load(model_path_list[i]))
+
+    # testデータ読み込み
+    df_test = pd.read_csv(datapath+"test_m.csv")
+    X_test = preprocess_test(df_test)
+
+    # pred_list = np.zeros((num_folds, X_test.shape[0]))
+    output_list = np.zeros((num_folds, X_test.shape[0], num_classes))
+
+    ### testデータを算出 ####################################
+
+    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    f1_list = np.zeros(num_folds)
+    oof = np.zeros(len(y))
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+        print(f"------------------------------ fold {fold} ------------------------------")
+
+        X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
+        _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+
+        # 出力
+        output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
+
+    print("CV: {}".format(np.mean(f1_list)))
+
+    # 平均値
+    y_out = np.mean(output_list, axis=0)
+
+    # 最終予測
+    y_preds = np.argmax(y_out, axis=1)
+    # print(y_preds)
+    # print(y_preds.shape)
+
+    ####################################################
 
     # 性能確認
-    # performance(model, dataloader)
-    calc_loo_cv_score(model, X, y)
-
-    # モデル保存
-    # model_path = 'Model/NN/10000.pth'
-    # torch.save(model.state_dict(), model_path)
+    # calc_loo_cv_score(model, X, y)
 
     # 可視化
     # visualize(X, y)
     # visualize_with_model(model, X, y)
 
-    # features_path = "Data/Dataset_004/"
-    # train_f = pd.read_parquet(features_path+"train.parq")
-
-    # X_f, y_f = preprocess(train_f)
-
-    # 可視化
-    # visualize(model, X_f, y_f)
-    # visualize(X, y)
+    # visualize_with_model(model, X_test, y_preds)
+    visualize_with_model_list(model_list, X_test, y_preds)

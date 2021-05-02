@@ -47,6 +47,9 @@ def acc_plot(acc):
 def scatter_plot(X, y, path, name):
     """ 散布図の描画 """
 
+    # print(X)
+    # print(y)
+
     # 20色のカラーマップ
     cm = plt.cm.get_cmap('tab20')
 
@@ -119,3 +122,47 @@ def visualize_with_model(model, X, y):
     scatter_plot(umap_X, y, path, "umap")
     plt.close()
 
+def visualize_with_model_list(model_list, X, y):
+
+    path = "Results/L2/"
+
+    # GPU
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    X_tensor = torch.from_numpy(X).to(device)
+
+    num_folds = len(model_list)
+    feature_list = np.zeros((num_folds, X_tensor.shape[0], 20))
+
+    for i, model in enumerate(model_list):
+
+        model = model.to(device)
+        model.eval() # 推論モードへ
+
+        # 20次元の特徴抽出
+        _, features = model(X_tensor)
+        features = features.to('cpu').detach().numpy().copy()
+
+        feature_list[i] = features
+
+    # 平均
+    features = np.mean(feature_list, axis=0)
+    print(features.shape)
+
+    # T-SNE
+    for i in [10, 50, 100]:
+        tsne = TSNE(n_components=2, random_state=41, perplexity=i)
+        tsne_transformed = tsne.fit_transform(features)
+
+        scatter_plot(tsne_transformed, y, path, "tsne_" + str(i))
+
+    # PCA
+    pca = PCA(n_components=2)
+    pca.fit(features)
+    pca_transformed = pca.fit_transform(features)
+    scatter_plot(pca_transformed, y, path, "pca")
+
+    # UMAP
+    umap = UMAP(n_components=2, random_state=0, n_neighbors=50)
+    umap_X = umap.fit_transform(features)
+    scatter_plot(umap_X, y, path, "umap")
+    plt.close()
