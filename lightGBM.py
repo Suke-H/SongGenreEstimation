@@ -105,47 +105,63 @@ if __name__ == '__main__':
         nn_list[i].load_state_dict(torch.load(nn_path_list[i]))
 
     # 特徴抽出
-    features = feature_extract(nn_list, X)
+    F_ori = feature_extract(nn_list, X)
     F_test = feature_extract(nn_list, X_test)
+    features = np.copy(F_ori)
+    y_tmp = np.copy(y)
 
     ### 学習（StratifiedKFoldを使用）#################################
-    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
-    # oof = np.zeros(len(y))
-    oof = np.zeros((len(y), num_classes))
-    f1_list = np.zeros(num_folds)
-    # test_f1_list = np.zeros(num_folds)
 
-    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
-        print(f"------------------------------ fold {fold} ------------------------------")
+    for pseudo_labeling_threshold in [0.95, 0.925, 0.9, 0.875, 0.85, -np.inf]:
 
-        F_train, y_train, F_val, y_val = features[indexes_trn], y[indexes_trn], features[indexes_val], y[indexes_val]
+        skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+        # oof = np.zeros(len(y))
+        oof = np.zeros((len(y_tmp), num_classes))
+        f1_list = np.zeros(num_folds)
+        # test_f1_list = np.zeros(num_folds)
+        predictions = np.zeros((X_test.shape[0], num_classes))
 
-        lgb_train = lgb.Dataset(F_train, label=y_train)
-        lgb_val = lgb.Dataset(F_val, label=y_val)
+        for fold, (indexes_trn, indexes_val) in enumerate(skf.split(features, y_tmp)):
+            print(f"------------------------------ fold {fold} ------------------------------")
 
-        lgb_params["learning_rate"] = learning_rate + np.random.random() * 0.001  # おまじない
-        num_round = 999999999
+            F_train, y_train, F_val, y_val = features[indexes_trn], y_tmp[indexes_trn], features[indexes_val], y_tmp[indexes_val]
 
-        # 学習
-        model = lgb.train(lgb_params, lgb_train, num_round, 
-            valid_sets=lgb_val, verbose_eval=300,
-            early_stopping_rounds=300 if num_round >= 1e8 else None, fobj=None)
+            lgb_train = lgb.Dataset(F_train, label=y_train)
+            lgb_val = lgb.Dataset(F_val, label=y_val)
 
-        model_list.append(model)
+            lgb_params["learning_rate"] = learning_rate + np.random.random() * 0.001  # おまじない
+            num_round = 999999999
 
-        # 保存
-        model.save_model(model_path_list[fold])
+            # 学習
+            model = lgb.train(lgb_params, lgb_train, num_round, 
+                valid_sets=lgb_val, verbose_eval=300,
+                early_stopping_rounds=300 if num_round >= 1e8 else None, fobj=None)
 
-        # cv
-        prediction_round = model.best_iteration+150 if num_round >= 1e8 else num_round  # おまじない
-        oof[indexes_val] = model.predict(F_val, num_iteration=prediction_round) 
-        print(classification_report(y_val, oof[indexes_val].argmax(1)))
-        score = f1_score(y_val, oof[indexes_val].argmax(1), average="macro")
-        f1_list[fold] = score
+            model_list.append(model)
 
-        # _, f1_list[fold] = calc_lgbm_cv_score(model_list[fold], F_val, y_val)
+            # 保存
+            model.save_model(model_path_list[fold])
 
-    print("CV: {}".format(np.mean(f1_list)))
+            # cv
+            prediction_round = model.best_iteration+150 if num_round >= 1e8 else num_round  # おまじない
+            oof[indexes_val] = model.predict(F_val, num_iteration=prediction_round) 
+            # print(classification_report(y_val, oof[indexes_val].argmax(1)))
+            score = f1_score(y_val, oof[indexes_val].argmax(1), average="macro")
+            f1_list[fold] = score
+
+            predictions += model.predict(F_test, num_iteration=prediction_round) / num_folds
+
+        print("CV: {}".format(np.mean(f1_list)))
+
+        # confidenceがしきい値以上のtestデータの特徴量を採用
+        candidates = np.where(predictions.max(1) > pseudo_labeling_threshold)[0]
+        print(F_test[candidates].shape)
+        features = np.concatenate([features, F_test[candidates]])
+        y_preds = np.array(predictions.argmax(1))
+        print(y_preds, candidates, type(predictions.argmax(1)))
+        y_tmp = np.concatenate([y_tmp, predictions.argmax(1)[candidates]])
+
+        print("th: {}, candidates: {}".format(pseudo_labeling_threshold, len(candidates)))
 
     ####################################################
 
@@ -167,7 +183,7 @@ if __name__ == '__main__':
     oof = np.zeros((len(y), num_classes))
     predictions = np.zeros((X_test.shape[0], num_classes))
 
-    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(F_ori, y)):
         print(f"------------------------------ fold {fold} ------------------------------")
         num_round = 999999999
 
