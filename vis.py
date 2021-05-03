@@ -67,6 +67,46 @@ def scatter_plot(X, y, path, name):
     plt.savefig(path + name + ".png")
     plt.close()
 
+def scatter_plot2(X, y_pred, y_true, path, name):
+    """ 散布図の描画 """
+
+    # print(X)
+    # print(y)
+
+    # 20色のカラーマップ
+    cm = plt.cm.get_cmap('tab20')
+
+    indices_TF = (y_pred == y_true).astype(np.int)
+    print(indices_TF)
+
+    # クラスごとに可視化
+    for label in np.unique(y_pred):
+        
+        # 8, 10はスキップ
+        # if label in [8, 10]:
+        #     continue
+
+        # 正解・不正解で場合分け
+
+        # (色は推定ラベル)
+        indices_correct = np.where((y_pred == label) & (indices_TF == 1))[0]
+        indices_wrong = np.where((y_pred == label) & (indices_TF == 0))[0]
+        # (色は正解ラベル)
+        # indices_correct = np.where((y_true == label) & (indices_TF == 1))[0]
+        # indices_wrong = np.where((y_true == label) & (indices_TF == 0))[0]
+
+        print("label: {}, correct: {}, wrong: {}".format(label, len(indices_correct), len(indices_wrong)))
+        
+        plt.scatter(X[indices_correct, 0], X[indices_correct, 1], 
+                    label=str(label), marker=".", color=cm.colors[label])
+
+        plt.scatter(X[indices_wrong, 0], X[indices_wrong, 1], 
+                    marker="x", color=cm.colors[label])
+        
+    plt.legend()
+    plt.savefig(path + name + ".png")
+    plt.close()
+
 def visualize(X, y):
 
     path = "Results/matsuda/on/"
@@ -122,9 +162,13 @@ def visualize_with_model(model, X, y):
     scatter_plot(umap_X, y, path, "umap")
     plt.close()
 
-def visualize_with_model_list(model_list, X, y):
+def visualize_with_model_list(model_list, X, y, y_true=None):
 
     path = "Results/L2/"
+
+    # print(X.shape)
+    # print(y.shape)
+    # print(y_true.shape)
 
     # GPU
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -153,16 +197,29 @@ def visualize_with_model_list(model_list, X, y):
         tsne = TSNE(n_components=2, random_state=41, perplexity=i)
         tsne_transformed = tsne.fit_transform(features)
 
-        scatter_plot(tsne_transformed, y, path, "tsne_" + str(i))
+        if y_true is None:
+            scatter_plot(tsne_transformed, y, path, "tsne_" + str(i))
+
+        else:
+            scatter_plot2(tsne_transformed, y, y_true, path, "tsne_" + str(i))
 
     # PCA
     pca = PCA(n_components=2)
     pca.fit(features)
     pca_transformed = pca.fit_transform(features)
-    scatter_plot(pca_transformed, y, path, "pca")
+
+    if y_true is None:
+        scatter_plot(tsne_transformed, y, path, "pca")
+
+    else:
+        scatter_plot2(tsne_transformed, y, y_true, path, "pca")
 
     # UMAP
     umap = UMAP(n_components=2, random_state=0, n_neighbors=50)
     umap_X = umap.fit_transform(features)
-    scatter_plot(umap_X, y, path, "umap")
-    plt.close()
+
+    if y_true is None:
+        scatter_plot(tsne_transformed, y, path, "umap")
+
+    else:
+        scatter_plot2(tsne_transformed, y, y_true, path, "umap")

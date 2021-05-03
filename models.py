@@ -66,6 +66,11 @@ class L2Softmax(torch.nn.Module):
         self.dropout5 = torch.nn.Dropout(p=0.25)
 
         self.fc6 = torch.nn.Linear(20, num_classes)
+
+        # self.fc6 = torch.nn.Linear(20, 20)
+        # self.dropout6 = torch.nn.Dropout(p=0.25)
+
+        # self.fc7 = torch.nn.Linear(20, num_classes)
  
     def forward(self, x):
         # テンソルのリサイズ: (N, 1, 64, 64) -> (N, 64*64)
@@ -89,15 +94,20 @@ class L2Softmax(torch.nn.Module):
         l2 = torch.sqrt((x**2).sum()) 
         feature = self.alpha * (x / l2)
 
-        x = self.fc6(feature)
+        x = self.fc6(x)
+
+        # x = F.relu(self.fc6(feature))
+        # x = self.dropout6(x)
+
+        # x = self.fc7(x)
         
         return x, feature
         # return x
 
-class EarlyStopping_On_Loss:
+class EarlyStopping:
     """earlystoppingクラス"""
 
-    def __init__(self, patience=5, verbose=False, path='Model/checkpoint_model.pth'):
+    def __init__(self, patience=5, verbose=False, path='Model/checkpoint_model.pth', param_name="val loss"):
         """引数：最小値の非更新数カウンタ、表示設定、モデル格納path"""
 
         self.patience = patience    #設定ストップカウンタ
@@ -107,8 +117,9 @@ class EarlyStopping_On_Loss:
         self.early_stop = False     #ストップフラグ
         self.val_loss_min = np.Inf   #前回のベストスコア記憶用
         self.path = path             #ベストモデル格納path
+        self.param_name = param_name
 
-    def __call__(self, val_loss, model):
+    def __call__(self, val_loss, model, f1_score):
         """
         特殊(call)メソッド
         実際に学習ループ内で最小lossを更新したか否かを計算させる部分
@@ -120,11 +131,10 @@ class EarlyStopping_On_Loss:
             self.checkpoint(val_loss, model)  #記録後にモデルを保存してスコア表示する
         elif score < self.best_score:  # ベストスコアを更新できなかった場合
             self.counter += 1   #ストップカウンタを+1
-            # if self.verbose:  #表示を有効にした場合は経過を表示
-            #     print(f'EarlyStopping counter: {self.counter} out of {self.patience}')  #現在のカウンタを表示する 
             if self.counter >= self.patience:  #設定カウントを上回ったらストップフラグをTrueに変更
                 self.early_stop = True
         else:  #ベストスコアを更新した場合
+            print("f1_score={}". format(f1_score))
             self.best_score = score  #ベストスコアを上書き
             self.checkpoint(val_loss, model)  #モデルを保存してスコア表示
             self.counter = 0  #ストップカウンタリセット
@@ -132,50 +142,7 @@ class EarlyStopping_On_Loss:
     def checkpoint(self, val_loss, model):
         '''ベストスコア更新時に実行されるチェックポイント関数'''
         if self.verbose:  #表示を有効にした場合は、前回のベストスコアからどれだけ更新したか？を表示
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}) on {self.counter} out of {self.patience}.  Saving model ...')
+            print(f'{self.param_name} decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}) on {self.counter} out of {self.patience}.  Saving model ...')
         torch.save(model.state_dict(), self.path)  #ベストモデルを指定したpathに保存
         self.val_loss_min = val_loss  #その時のlossを記録する
-
-class EarlyStopping_on_F1macro:
-    """earlystoppingクラス"""
-
-    def __init__(self, patience=5, verbose=False, path='Model/checkpoint_model.pth'):
-        """引数：最小値の非更新数カウンタ、表示設定、モデル格納path"""
-
-        self.patience = patience    #設定ストップカウンタ
-        self.verbose = verbose      #表示の有無
-        self.counter = 0            #現在のカウンタ値
-        self.best_score = None      #ベストスコア
-        self.early_stop = False     #ストップフラグ
-        self.val_loss_min = np.Inf   #前回のベストスコア記憶用
-        self.path = path             #ベストモデル格納path
-
-    def __call__(self, val_loss, model):
-        """
-        特殊(call)メソッド
-        実際に学習ループ内で最小lossを更新したか否かを計算させる部分
-        """
-        score = -val_loss
-
-        if self.best_score is None:  #1Epoch目の処理
-            self.best_score = score   #1Epoch目はそのままベストスコアとして記録する
-            self.checkpoint(val_loss, model)  #記録後にモデルを保存してスコア表示する
-        elif score < self.best_score:  # ベストスコアを更新できなかった場合
-            self.counter += 1   #ストップカウンタを+1
-            # if self.verbose:  #表示を有効にした場合は経過を表示
-            #     print(f'EarlyStopping counter: {self.counter} out of {self.patience}')  #現在のカウンタを表示する 
-            if self.counter >= self.patience:  #設定カウントを上回ったらストップフラグをTrueに変更
-                self.early_stop = True
-        else:  #ベストスコアを更新した場合
-            self.best_score = score  #ベストスコアを上書き
-            self.checkpoint(val_loss, model)  #モデルを保存してスコア表示
-            self.counter = 0  #ストップカウンタリセット
-
-    def checkpoint(self, val_loss, model):
-        '''ベストスコア更新時に実行されるチェックポイント関数'''
-        if self.verbose:  #表示を有効にした場合は、前回のベストスコアからどれだけ更新したか？を表示
-            print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}) on {self.counter} out of {self.patience}.  Saving model ...')
-        torch.save(model.state_dict(), self.path)  #ベストモデルを指定したpathに保存
-        self.val_loss_min = val_loss  #その時のlossを記録する
-
 
