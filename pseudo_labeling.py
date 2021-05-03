@@ -436,7 +436,7 @@ for pseudo_labeling_threshold in [0.95, 0.925, 0.9, 0.875, 0.85, -np.inf]:
 
 ########
 df_submission = df_sample_sub.copy()
-df_main.to_csv("df_main.csv")
+# df_main.to_csv("df_main.csv")
 print(df_main[["index", "genre"]])
 a = input()
 df_submission["genre"] = df_submission["index"].map(dict(df_main[["index", "genre"]].values))
