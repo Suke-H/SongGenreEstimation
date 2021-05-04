@@ -35,8 +35,23 @@ def calc_lgbm_cv_score(model, F, y=None):  # leave-one-out
 
         return preds, score
 
-def feature_extract(model_list, X):
+def feature_extract(model, X):
     """ NNで学習データ(前処理済み)を20次元の特徴に抽出 """
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    X_tensor = torch.from_numpy(X).to(device)
+
+    model = model.to(device)
+    model.eval() # 推論モードへ
+
+    # 20次元の特徴抽出
+    _, features = model(X_tensor)
+    features = features.to('cpu').detach().numpy().copy()
+
+    return features
+
+def mean_feature_extract(model_list, X):
+    """ 複数のNNの平均値で、学習データ(前処理済み)を20次元の特徴に抽出 """
 
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     X_tensor = torch.from_numpy(X).to(device)
@@ -57,7 +72,6 @@ def feature_extract(model_list, X):
 
     # 平均
     features = np.mean(feature_list, axis=0)
-    print(features.shape)
 
     return features
 
@@ -105,63 +119,53 @@ if __name__ == '__main__':
         nn_list[i].load_state_dict(torch.load(nn_path_list[i]))
 
     # 特徴抽出
-    F_ori = feature_extract(nn_list, X)
-    F_test = feature_extract(nn_list, X_test)
-    features = np.copy(F_ori)
-    y_tmp = np.copy(y)
+
+    F_test = mean_feature_extract(nn_list, X_test)
 
     ### 学習（StratifiedKFoldを使用）#################################
 
-    for pseudo_labeling_threshold in [0.95, 0.925, 0.9, 0.875, 0.85, -np.inf]:
+    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    # oof = np.zeros(len(y))
+    oof = np.zeros((len(y), num_classes))
+    f1_list = np.zeros(num_folds)
+    # test_f1_list = np.zeros(num_folds)
+    predictions = np.zeros((X_test.shape[0], num_classes))
 
-        skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
-        # oof = np.zeros(len(y))
-        oof = np.zeros((len(y_tmp), num_classes))
-        f1_list = np.zeros(num_folds)
-        # test_f1_list = np.zeros(num_folds)
-        predictions = np.zeros((X_test.shape[0], num_classes))
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+        print(f"------------------------------ fold {fold} ------------------------------")
+        
+        # trainデータのみ（valデータ以外）で学習したNNで特徴抽出
+        F = feature_extract(nn_list[fold], X)
 
-        for fold, (indexes_trn, indexes_val) in enumerate(skf.split(features, y_tmp)):
-            print(f"------------------------------ fold {fold} ------------------------------")
+        # trainデータとvalデータに分割
+        F_train, y_train, F_val, y_val = F[indexes_trn], y[indexes_trn], F[indexes_val], y[indexes_val]
 
-            F_train, y_train, F_val, y_val = features[indexes_trn], y_tmp[indexes_trn], features[indexes_val], y_tmp[indexes_val]
+        lgb_train = lgb.Dataset(F_train, label=y_train)
+        lgb_val = lgb.Dataset(F_val, label=y_val)
 
-            lgb_train = lgb.Dataset(F_train, label=y_train)
-            lgb_val = lgb.Dataset(F_val, label=y_val)
+        lgb_params["learning_rate"] = learning_rate + np.random.random() * 0.001  # おまじない
+        num_round = 999999999
 
-            lgb_params["learning_rate"] = learning_rate + np.random.random() * 0.001  # おまじない
-            num_round = 999999999
+        # 学習
+        model = lgb.train(lgb_params, lgb_train, num_round, 
+            valid_sets=lgb_val, verbose_eval=300,
+            early_stopping_rounds=300 if num_round >= 1e8 else None, fobj=None)
 
-            # 学習
-            model = lgb.train(lgb_params, lgb_train, num_round, 
-                valid_sets=lgb_val, verbose_eval=300,
-                early_stopping_rounds=300 if num_round >= 1e8 else None, fobj=None)
+        model_list.append(model)
 
-            model_list.append(model)
+        # 保存
+        model.save_model(model_path_list[fold])
 
-            # 保存
-            model.save_model(model_path_list[fold])
+        # cv
+        prediction_round = model.best_iteration+150 if num_round >= 1e8 else num_round  # おまじない
+        oof[indexes_val] = model.predict(F_val, num_iteration=prediction_round) 
+        # print(classification_report(y_val, oof[indexes_val].argmax(1)))
+        score = f1_score(y_val, oof[indexes_val].argmax(1), average="macro")
+        f1_list[fold] = score
 
-            # cv
-            prediction_round = model.best_iteration+150 if num_round >= 1e8 else num_round  # おまじない
-            oof[indexes_val] = model.predict(F_val, num_iteration=prediction_round) 
-            # print(classification_report(y_val, oof[indexes_val].argmax(1)))
-            score = f1_score(y_val, oof[indexes_val].argmax(1), average="macro")
-            f1_list[fold] = score
+        predictions += model.predict(F_test, num_iteration=prediction_round) / num_folds
 
-            predictions += model.predict(F_test, num_iteration=prediction_round) / num_folds
-
-        print("CV: {}".format(np.mean(f1_list)))
-
-        # confidenceがしきい値以上のtestデータの特徴量を採用
-        candidates = np.where(predictions.max(1) > pseudo_labeling_threshold)[0]
-        print(F_test[candidates].shape)
-        features = np.concatenate([features, F_test[candidates]])
-        y_preds = np.array(predictions.argmax(1))
-        print(y_preds, candidates, type(predictions.argmax(1)))
-        y_tmp = np.concatenate([y_tmp, predictions.argmax(1)[candidates]])
-
-        print("th: {}, candidates: {}".format(pseudo_labeling_threshold, len(candidates)))
+    print("CV: {}".format(np.mean(f1_list)))
 
     ####################################################
 
@@ -183,13 +187,18 @@ if __name__ == '__main__':
     oof = np.zeros((len(y), num_classes))
     predictions = np.zeros((X_test.shape[0], num_classes))
 
-    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(F_ori, y)):
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
         print(f"------------------------------ fold {fold} ------------------------------")
-        num_round = 999999999
 
+        # trainデータのみ（valデータ以外）で学習したNNで特徴抽出
+        F = feature_extract(nn_list[fold], X)
+
+        # trainデータとvalデータに分割
+        F_train, y_train, F_val, y_val = F[indexes_trn], y[indexes_trn], F[indexes_val], y[indexes_val]
+
+        num_round = 999999999
         model = model_list[fold]
 
-        F_train, y_train, F_val, y_val = features[indexes_trn], y[indexes_trn], features[indexes_val], y[indexes_val]
         # cv
         prediction_round = model.best_iteration+150 if num_round >= 1e8 else num_round  # おまじない
         oof[indexes_val] = model.predict(F_val, num_iteration=prediction_round)
@@ -228,5 +237,3 @@ if __name__ == '__main__':
 
     # make submission file
     df_submission.to_csv("Submit/lightGBM.csv", header=None, index=False)
-
-

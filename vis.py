@@ -47,9 +47,6 @@ def acc_plot(acc):
 def scatter_plot(X, y, path, name):
     """ 散布図の描画 """
 
-    # print(X)
-    # print(y)
-
     # 20色のカラーマップ
     cm = plt.cm.get_cmap('tab20')
 
@@ -69,9 +66,6 @@ def scatter_plot(X, y, path, name):
 
 def scatter_plot2(X, y_pred, y_true, path, name):
     """ 散布図の描画 """
-
-    # print(X)
-    # print(y)
 
     # 20色のカラーマップ
     cm = plt.cm.get_cmap('tab20')
@@ -109,13 +103,13 @@ def scatter_plot2(X, y_pred, y_true, path, name):
 
 def visualize(X, y):
 
-    path = "Results/matsuda/on/"
+    path = "Results/X/"
 
     # T-SNE
-    # for i in [10, 50, 100]:
-    #     tsne = TSNE(n_components=2, random_state=41, perplexity=i)
-    #     tsne_transformed = tsne.fit_transform(X)
-    #     scatter_plot(tsne_transformed, y, "tsne_" + str(i))
+    for i in [10, 50, 100]:
+        tsne = TSNE(n_components=2, random_state=41, perplexity=i)
+        tsne_transformed = tsne.fit_transform(X)
+        scatter_plot(tsne_transformed, y, path, "tsne_" + str(i))
 
     # PCA
     pca = PCA(n_components=2)
@@ -124,9 +118,9 @@ def visualize(X, y):
     scatter_plot(pca_transformed, y, path, "pca")
 
     # UMAP
-    # umap = UMAP(n_components=2, random_state=0, n_neighbors=50)
-    # umap_X = umap.fit_transform(X)
-    # scatter_plot(umap_X, y, "umap")
+    umap = UMAP(n_components=2, random_state=0, n_neighbors=50)
+    umap_X = umap.fit_transform(X)
+    scatter_plot(umap_X, y, path, "umap")
     
 def visualize_with_model(model, X, y):
 
@@ -162,9 +156,9 @@ def visualize_with_model(model, X, y):
     scatter_plot(umap_X, y, path, "umap")
     plt.close()
 
-def visualize_with_model_list(model_list, X, y, y_true=None):
+def visualize_with_model_list(model_list, X, y, path, y_true=None):
 
-    path = "Results/L2/"
+    # path = "Results/SMOTE/"
 
     # print(X.shape)
     # print(y.shape)
@@ -209,17 +203,17 @@ def visualize_with_model_list(model_list, X, y, y_true=None):
     pca_transformed = pca.fit_transform(features)
 
     if y_true is None:
-        scatter_plot(tsne_transformed, y, path, "pca")
+        scatter_plot(pca_transformed, y, path, "pca")
 
     else:
-        scatter_plot2(tsne_transformed, y, y_true, path, "pca")
+        scatter_plot2(pca_transformed, y, y_true, path, "pca")
 
     # UMAP
     umap = UMAP(n_components=2, random_state=0, n_neighbors=50)
-    umap_X = umap.fit_transform(features)
+    umap_transformed = umap.fit_transform(features)
 
     if y_true is None:
-        scatter_plot(tsne_transformed, y, path, "umap")
+        scatter_plot(umap_transformed, y, path, "umap")
 
     else:
-        scatter_plot2(tsne_transformed, y, y_true, path, "umap")
+        scatter_plot2(umap_transformed, y, y_true, path, "umap")

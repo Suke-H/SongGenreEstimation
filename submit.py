@@ -34,7 +34,7 @@ num_folds = 4
 # model.load_state_dict(torch.load(model_path))
 
 model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
-model_path_list = ['Model/NN/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
+model_path_list = ['Model/NN/L2Softmax_SMOTE_' + str(i) + '.pth' for i in range(num_folds)]
 
 # モデル呼び出し
 for i in range(num_folds):
@@ -104,5 +104,4 @@ print("\nfirst 10 test data")
 print(df_submission.head(10))
 
 # make submission file
-df_submission.to_csv("Submit/L2Softmax.csv", header=None, index=False)
-df_submission.to_csv("Submit/L2Softmax_0.csv", header=None, index=False)
+df_submission.to_csv("Submit/L2Softmax_SMOTE.csv", header=None, index=False)

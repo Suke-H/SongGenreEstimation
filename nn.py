@@ -10,10 +10,11 @@ import pandas as pd
 from tqdm import tqdm
 import pyarrow as pa
 from time import time
+from collections import Counter
 
 from models import NN, L2Softmax, EarlyStopping
 from vis import loss_plot, acc_plot, visualize, visualize_with_model, visualize_with_model_list
-from loss import SelfAdjDiceLoss
+from SMOTE import PreProcess
 
 def mean_norm(df):
     """ 標準化 """
@@ -93,7 +94,6 @@ def calc_loo_cv_score(model, X, y=None):  # leave-one-out
 
         return outputs, preds, score
     
-
 def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epochs, path):
     """ 学習 """
 
@@ -186,8 +186,15 @@ if __name__ == '__main__':
 
     #　trainデータ読み込み
     datapath = "Data/"
-    df_train = pd.read_csv(datapath+"train_m.csv")
-    X, y = preprocess(df_train)
+    # df_train = pd.read_csv(datapath+"train_m.csv")
+    # X, y = preprocess(df_train)
+    # X, y = PreProcess()
+
+    # np.save(datapath+"X_up", X)
+    # np.save(datapath+"y_up", y)
+
+    X = np.load(datapath+"X_up.npy")
+    y = np.load(datapath+"y_up.npy")
 
     # モデル呼び出し
     data_dim = X.shape[1]
@@ -195,7 +202,8 @@ if __name__ == '__main__':
     num_folds = 4
     model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
     # model_list = [NN(data_dim, num_classes) for i in range(num_folds)]
-    model_path_list = ['Model/NN/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
+    model_path_list = ['Model/NN/L2Softmax_SMOTE_' + str(i) + '.pth' for i in range(num_folds)]
+    # model_path_list = ['Model/NN/NN_SMOTE_' + str(i) + '.pth' for i in range(num_folds)]
 
     # 最適アルゴリズム
     lr = 0.001
@@ -206,34 +214,30 @@ if __name__ == '__main__':
     criterion = nn.CrossEntropyLoss(reduction='mean')
     # criterion = SelfAdjDiceLoss()
 
-    # 学習回数
-    num_epochs = 100000
+    # 学習回数from collections import CounteriedKFoldを使用）#################################
+    # skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    # oof = np.zeros(len(y))
+    # f1_list = np.zeros(num_folds)
+    # test_f1_list = np.zeros(num_folds)
 
-    ### 学習（StratifiedKFoldを使用）#################################
-    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
-    oof = np.zeros(len(y))
-    f1_list = np.zeros(num_folds)
-    test_f1_list = np.zeros(num_folds)
+    # for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+    #     print(f"------------------------------ fold {fold} ------------------------------")
 
-    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
-        print(f"------------------------------ fold {fold} ------------------------------")
+    #     X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
 
-        X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
+    #     # 学習
+    #     train(model_list[fold], X_train, y_train, X_val, y_val, optimizer_list[fold], criterion, num_epochs, model_path_list[fold])
 
-        # 学習
-        train(model_list[fold], X_train, y_train, X_val, y_val, optimizer_list[fold], criterion, num_epochs, model_path_list[fold])
+    #     # 各foldのvalidationデータの推定結果を合体させて、最終出力とする
+    #     # oof[indexes_val] = model.predict(df_val, num_iteration=prediction_round)
+    #     _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
 
-        # 各foldのvalidationデータの推定結果を合体させて、最終出力とする
-        # oof[indexes_val] = model.predict(df_val, num_iteration=prediction_round)
-        _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+    #     # test
+    #     model_list[fold].load_state_dict(torch.load(model_path_list[fold]))
+    #     _, _, test_f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
 
-        # test
-        model_list[fold].load_state_dict(torch.load(model_path_list[fold]))
-        _, _, test_f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
-
-
-    print("CV: {}".format(np.mean(f1_list)))
-    print("test CV: {}".format(np.mean(test_f1_list)))
+    # print("CV: {}".format(np.mean(f1_list)))
+    # print("test CV: {}".format(np.mean(test_f1_list)))
 
     ####################################################
 
@@ -250,6 +254,43 @@ if __name__ == '__main__':
 
     ### testデータを算出 ####################################
 
+    # skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    # f1_list = np.zeros(num_folds)
+    # oof = np.zeros(len(y))
+    # for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+    #     print(f"------------------------------ fold {fold} ------------------------------")
+
+    #     X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
+    #     _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+
+    #     # 出力
+    #     output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
+
+    # print("CV: {}".format(np.mean(f1_list)))
+
+    # # 平均値
+    # y_out = np.mean(output_list, axis=0)
+
+    # # 最終予測
+    # y_preds = np.argmax(y_out, axis=1)
+    # # print(y_preds)
+    # # print(y_preds.shape)
+
+    ####################################################
+
+    # 性能確認
+    # calc_loo_cv_score(model, X, y)
+
+    # visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/SMOTE/up/", y)
+
+    #　trainデータ読み込み
+    datapath = "Data/"
+    df_train = pd.read_csv(datapath+"train_m.csv")
+    X, y = preprocess(df_train)
+
+    output_list = np.zeros((num_folds, X_test.shape[0], num_classes))
+    ### testデータを算出 ####################################
+
     skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
     f1_list = np.zeros(num_folds)
     oof = np.zeros(len(y))
@@ -258,6 +299,10 @@ if __name__ == '__main__':
 
         X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
         _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+
+        print(sorted(Counter(y_train).items()))
+        print(sorted(Counter(y_val).items()))
+        a = input()
 
         # 出力
         output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
@@ -274,11 +319,9 @@ if __name__ == '__main__':
 
     ####################################################
 
-    # 性能確認
-    # calc_loo_cv_score(model, X, y)
-
     # 可視化
     # visualize(X, y)
-    # visualize_with_model(model, X_test, y_preds)
-    # visualize_with_model_list(model_list, X, oof.astype(np.int), y)
+    # visualize_with_model_list(model_list, X_test, y_preds, "Results/SMOTE/test/")
+    # visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/SMOTE/ori/", y)
     # visualize_with_model_list(model_list, X_val, oof[indexes_val].astype(np.int), y_val)
+    print(confusion_matrix(y, oof.astype(np.int)))
