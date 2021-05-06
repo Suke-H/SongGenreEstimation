@@ -237,19 +237,18 @@ if __name__ == '__main__':
     # model_list = [NN(data_dim, num_classes) for i in range(num_folds)]
     # model_path_list = ['Model/NN/NN_down_' + str(i) + '.pth' for i in range(num_folds)]
 
-    num_layers = 3
-    num_units = [500, 400, 100]
-    dropouts = [0.5, 0.5, 0.1]
+    num_layers = 4
+    num_units = [800, 700, 700, 300]
+    dropouts = [0.5, 0, 0.3, 0.2]
 
     model_list = [L2Softmax_tuning(data_dim, num_classes, num_layers, num_units, dropouts) for i in range(num_folds)]
     model_path_list = ['Model/tuning/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
 
-
     # 最適アルゴリズム
-    # lr = 0.001
-    # beta1, beta2 = 0.0, 0.9
-    # optimizer_list = [torch.optim.Adam(model_list[i].parameters(), lr, [beta1, beta2]) for i in range(num_folds)]
-    optimizer_list = [optim.RMSprop(model_list[i].parameters()) for i in range(num_folds)]
+    adam_lr = 0.00061
+    weight_decay = 5.8342*10**(-6)
+    optimizer_list = [optim.Adam(model_list[i].parameters(), lr=adam_lr, weight_decay=weight_decay) for i in range(num_folds)]
+    # optimizer_list = [optim.RMSprop(model_list[i].parameters()) for i in range(num_folds)]
 
     # 損失関数
     criterion = nn.CrossEntropyLoss(reduction='mean')

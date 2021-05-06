@@ -12,14 +12,14 @@ import matplotlib.pyplot as plt
 
 import torch
 
-from nn import preprocess_test, preprocess, calc_loo_cv_score
-from models import L2Softmax
+from NN import preprocess_test, preprocess, calc_loo_cv_score
+from models import L2Softmax, L2Softmax_tuning
 
 datapath = "Data/"
 # df_train = pd.read_csv(datapath+"train_m.csv")
 df_test = pd.read_csv(datapath+"test_m.csv")
 test_x = preprocess_test(df_test)
-print(df_test)
+# print(df_test)
 
 #　trainデータ読み込み
 df_train = pd.read_csv(datapath+"train_m.csv")
@@ -33,8 +33,15 @@ num_folds = 4
 # model_path = 'Model/NN/L2softmax.pth'
 # model.load_state_dict(torch.load(model_path))
 
-model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
-model_path_list = ['Model/NN/L2Softmax_SMOTE_' + str(i) + '.pth' for i in range(num_folds)]
+# model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
+# model_path_list = ['Model/tuning/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
+
+num_layers = 4
+num_units = [800, 700, 700, 300]
+dropouts = [0.5, 0, 0.3, 0.2]
+
+model_list = [L2Softmax_tuning(data_dim, num_classes, num_layers, num_units, dropouts) for i in range(num_folds)]
+model_path_list = ['Model/tuning/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
 
 # モデル呼び出し
 for i in range(num_folds):
@@ -104,4 +111,4 @@ print("\nfirst 10 test data")
 print(df_submission.head(10))
 
 # make submission file
-df_submission.to_csv("Submit/L2Softmax_SMOTE.csv", header=None, index=False)
+df_submission.to_csv("Submit/L2Softmax_tuning.csv", header=None, index=False)

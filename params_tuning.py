@@ -1,15 +1,20 @@
-### データ準備 ############################################
-
 import torch
 from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
 from torchvision import transforms
 import torch.utils.data as data
-from torchsummary import summary 
+from torchsummary import summary
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.optim as optim
 
+import optuna
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import StratifiedKFold
+from sklearn.metrics import classification_report, f1_score, confusion_matrix, ConfusionMatrixDisplay
+from time import time
 
 def mean_norm(df):
     """ 標準化 """
@@ -39,29 +44,7 @@ def make_dataloader(X, y, batch_size):
 
     return dataloader
 
-# データ前処理
-datapath = "Data/"
-df = pd.read_csv(datapath+"train_m.csv")
-X, y = preprocess(df)
-
-# trainとvalに分割
-skf = StratifiedKFold(n_splits=4, shuffle=True, random_state=15)
-for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
-    X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
-    break
-
-# dataloader作成
-batch_size = 100
-train_loader = make_dataloader(X_train, y_train, batch_size)
-val_loader = make_dataloader(X_val, y_val, batch_size)
-
 ### モデルの定義 ##########################################
-
-import torch
-import torch.nn as nn
-import torch.nn.functional as F
-
-import optuna
 
 class Net(nn.Module):
     def __init__(self, data_dim, num_classes, \
@@ -89,8 +72,6 @@ class Net(nn.Module):
 
         self.alpha = 16
 
-        # print(self.fc)
-
     def forward(self, x):
 
         # FC層
@@ -107,37 +88,48 @@ class Net(nn.Module):
         # 最終層
         x = self.fc_last(feature)
 
-        return x
+        return x, feature
 
-### train & test ############################################33
+### train  ############################################
 
-def train(model, device, train_loader, optimizer, criterion):
-  model.train()
-  for batch_idx, (data, target) in enumerate(train_loader):
-        data, target = data.to(device), target.to(device)
+def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epochs):
+    """ 学習 """
+
+    # ネットワークをGPUへ
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    model = model.to(device)
+
+    model.train() # 訓練モードに
+    dataloader = make_dataloader(X_train, y_train, 100)
+
+    # データローダーからミニバッチを取り出すループ
+    for inputs, labels in dataloader:
+
+        inputs, labels = inputs.to(device), labels.to(device)
+
+        # optimizerを初期化
         optimizer.zero_grad()
-        output = model(data)
-        loss = criterion(output, target)
-        # print(batch_idx)
+
+        # 順伝搬（forward）計算
+        outputs, _ = model(inputs)
+
+        loss = criterion(outputs, labels)  # 損失を計算
+        _, preds = torch.max(outputs, 1)  # ラベルを予測
+
+        # 逆伝播（backward）計算
         loss.backward()
         optimizer.step()
 
-def test(model, device, test_loader):
-    model.eval()
-    correct = 0
-    with torch.no_grad():
-        for data, target in test_loader:
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            pred = output.max(1, keepdim=True)[1]
-            correct += pred.eq(target.view_as(pred)).sum().item()
+    model.eval() # 推論モードに
 
-    # エラー率（1 - acc）        
-    return 1 - correct / len(test_loader.dataset)
+    # f1 macro算出
+    outputs, _ = model(torch.from_numpy(X_val).to(device))
+    _, preds = torch.max(outputs, 1)
+    f1_macro = f1_score(y_val, preds.to('cpu').detach().numpy().copy(), average="macro")
+
+    return -f1_macro
 
 ### 最適化アルゴリズム ##############################
-
-import torch.optim as optim
 
 def get_optimizer(trial, model):
     optimizer_names = ['Adam', 'MomentumSGD', 'rmsprop']
@@ -161,10 +153,14 @@ def get_optimizer(trial, model):
     return optimizer
 
 ### パラメータチューニング用の目的関数 #############################
-EPOCH = 50
-data_dim = X.shape[1]
-num_classes = 11
+
 def objective(trial):
+
+    EPOCH = 50 # 学習試行数
+    data_dim = X.shape[1]
+    num_classes = 11
+    num_folds = 4
+
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
     # FC層の数（最終層を除く）
@@ -177,10 +173,7 @@ def objective(trial):
     dropouts = [trial.suggest_discrete_uniform("dropout_"+str(i), 0, 0.5, 0.1) for i in range(num_layers)]
 
     model = Net(data_dim, num_classes, trial, num_layers, num_units, dropouts).to(device)
-    # print(model)
     # summary(model, input_size=(X.shape[1], ))
-
-    # a = input()
 
     # 最適アルゴリズム
     optimizer = get_optimizer(trial, model)
@@ -188,23 +181,33 @@ def objective(trial):
     # 損失関数
     criterion = nn.CrossEntropyLoss(reduction='mean')
 
-    for step in range(EPOCH):
-        train(model, device, train_loader, optimizer, criterion)
-        error_rate = test(model, device, val_loader)
+    ### 学習（StratifiedKFoldを使用）#################################
+    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    f1_list = np.zeros(num_folds)
 
-    # validationデータのエラー率を出力
-    return error_rate
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+        X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
 
-# if __name__ == '__main__':
+        # 学習
+        for step in range(EPOCH):
+            f1_list[fold] = train(model, X_train, y_train, X_val, y_val, optimizer, criterion, EPOCH)
 
-from time import time
-start = time()
+    return np.mean(f1_list)
 
-TRIAL_SIZE = 100
-study = optuna.create_study()
-study.optimize(objective, n_trials=TRIAL_SIZE)
-# summary(model, input_size=(X.shape[1], ))
-print(study.best_params)
+if __name__ == '__main__':
 
-end = time()
-print("time: {}m".format((end-start)/60))
+    # データ前処理
+    datapath = "Data/"
+    df = pd.read_csv(datapath+"train_m.csv")
+    X, y = preprocess(df)
+
+    # チューニング開始
+    start = time()
+
+    TRIAL_SIZE = 100 # チューニング試行数
+    study = optuna.create_study()
+    study.optimize(objective, n_trials=TRIAL_SIZE)
+    print(study.best_params)
+
+    end = time()
+    print("time: {}m".format((end-start)/60))
