@@ -104,6 +104,49 @@ class L2Softmax(torch.nn.Module):
         return x, feature
         # return x
 
+class L2Softmax_tuning(nn.Module):
+    def __init__(self, data_dim, num_classes, num_layers, num_units, dropouts):
+        super(L2Softmax_tuning, self).__init__()
+
+        # 活性化関数
+        # self.activation = get_activation(trial)
+        self.activation = F.relu
+
+        # FC層
+        self.fc = nn.ModuleList([])
+        pre_units = data_dim
+        for i in range(num_layers):
+            self.fc.append(nn.Linear(pre_units, num_units[i]))
+            pre_units = num_units[i]
+
+        # Drouout
+        self.dropouts = nn.ModuleList([])
+        for i in range(num_layers):
+            self.dropouts.append(nn.Dropout(p=dropouts[i]))
+
+        # 最終層
+        self.fc_last = nn.Linear(pre_units, num_classes)
+
+        self.alpha = 16
+
+    def forward(self, x):
+
+        # FC層
+        for (f, d) in zip(self.fc, self.dropouts):
+            # print("f: {}\nd: {}".format(f, d))
+            x = f(x)
+            x = self.activation(x)
+            x = d(x)
+
+        # L2softmax層
+        l2 = torch.sqrt((x**2).sum()) 
+        feature = self.alpha * (x / l2)
+
+        # 最終層
+        x = self.fc_last(feature)
+
+        return x, feature
+
 class EarlyStopping:
     """earlystoppingクラス"""
 

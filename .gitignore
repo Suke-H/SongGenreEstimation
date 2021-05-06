@@ -1,9 +1,10 @@
 *.png
 *.zip
+*.log
+Share
 Data
 Model
 Results
 Submit
 images
 __pycache__
-*.log

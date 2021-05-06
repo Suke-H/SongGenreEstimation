@@ -1,10 +1,11 @@
-import numpy as np
 import torch
 import torch.nn as nn
 import torch.utils.data as data
+import torch.optim as optim
 
+import numpy as np
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report, f1_score, confusion_matrix
+from sklearn.metrics import classification_report, f1_score, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import StratifiedKFold
 import pandas as pd
 from tqdm import tqdm
@@ -12,8 +13,9 @@ import pyarrow as pa
 from time import time
 from collections import Counter
 from imblearn.over_sampling import SMOTE
+from matplotlib import pyplot as plt
 
-from models import NN, L2Softmax, EarlyStopping
+from models import NN, L2Softmax, EarlyStopping, L2Softmax_tuning
 from vis import loss_plot, acc_plot, visualize, visualize_with_model, visualize_with_model_list
 from SMOTE import PreProcess
 
@@ -99,6 +101,10 @@ def calc_loo_cv_score(model, X, y=None):  # leave-one-out
 
     outputs, _ = model(X)
     _, preds = torch.max(outputs, 1)
+
+    # softmax
+    m = nn.Softmax(dim=1)
+    outputs = m(outputs)
     outputs = outputs.to('cpu').detach().numpy().copy()
     preds = preds.to('cpu').detach().numpy().copy()
 
@@ -115,7 +121,7 @@ def calc_loo_cv_score(model, X, y=None):  # leave-one-out
 
         return outputs, preds, score
     
-def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epochs, path, phase):
+def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epochs, path):
     """ 学習 """
 
     # ネットワークをGPUへ
@@ -134,14 +140,9 @@ def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epoch
         model.train() # 訓練モードに
         epoch_loss = epoch_corrects = total = 0
 
-        # 1stなら8, 10, elseの3クラス分類
-        if phase == "1st":
-            # dataloader = make_dataloader(X_train, y_train, 100)
-            dataloader = make_under_sampling_dataloader(X_train, y_train, 100)
-            # dataloader = make_under_sampling_dataloader(X_train, y_train, 100)
-
-        # 2ndなら0, 1, 2, 3, 4, 5, 6, 7, 9の9クラス分類
-        elif phase == "2nd":
+        dataloader = make_dataloader(X_train, y_train, 100)
+        # dataloader = make_under_sampling_dataloader(X_train, y_train, 100)
+        # dataloader = make_under_sampling_dataloader(X_train, y_train, 100)
 
         # データローダーからミニバッチを取り出すループ
         for inputs, labels in dataloader:
@@ -231,16 +232,24 @@ if __name__ == '__main__':
     num_classes = 11
     num_folds = 4
 
-    model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
-    model_path_list = ['Model/NN/L2Softmax_down_' + str(i) + '.pth' for i in range(num_folds)]
+    # model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
+    # model_path_list = ['Model/NN/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
     # model_list = [NN(data_dim, num_classes) for i in range(num_folds)]
     # model_path_list = ['Model/NN/NN_down_' + str(i) + '.pth' for i in range(num_folds)]
 
-    # 最適アルゴリズム
-    lr = 0.001
-    beta1, beta2 = 0.0, 0.9
+    num_layers = 3
+    num_units = [500, 400, 100]
+    dropouts = [0.5, 0.5, 0.1]
 
-    optimizer_list = [torch.optim.Adam(model_list[i].parameters(), lr, [beta1, beta2]) for i in range(num_folds)]
+    model_list = [L2Softmax_tuning(data_dim, num_classes, num_layers, num_units, dropouts) for i in range(num_folds)]
+    model_path_list = ['Model/tuning/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
+
+
+    # 最適アルゴリズム
+    # lr = 0.001
+    # beta1, beta2 = 0.0, 0.9
+    # optimizer_list = [torch.optim.Adam(model_list[i].parameters(), lr, [beta1, beta2]) for i in range(num_folds)]
+    optimizer_list = [optim.RMSprop(model_list[i].parameters()) for i in range(num_folds)]
 
     # 損失関数
     criterion = nn.CrossEntropyLoss(reduction='mean')
@@ -252,8 +261,8 @@ if __name__ == '__main__':
     ### 学習（StratifiedKFoldを使用）#################################
     skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
     oof = np.zeros(len(y))
+    output_list = np.zeros((X.shape[0], num_classes))
     f1_list = np.zeros(num_folds)
-    test_f1_list = np.zeros(num_folds)
 
     for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
         print(f"------------------------------ fold {fold} ------------------------------")
@@ -264,15 +273,9 @@ if __name__ == '__main__':
         train(model_list[fold], X_train, y_train, X_val, y_val, optimizer_list[fold], criterion, num_epochs, model_path_list[fold])
 
         # 各foldのvalidationデータの推定結果を合体させて、最終出力とする
-        # oof[indexes_val] = model.predict(df_val, num_iteration=prediction_round)
-        _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
-
-        # test
-        model_list[fold].load_state_dict(torch.load(model_path_list[fold]))
-        _, _, test_f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+        output_list[indexes_val], oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
 
     print("CV: {}".format(np.mean(f1_list)))
-    print("test CV: {}".format(np.mean(test_f1_list)))
 
     ####################################################
 
@@ -285,45 +288,9 @@ if __name__ == '__main__':
     X_test = preprocess_test(df_test)
 
     # pred_list = np.zeros((num_folds, X_test.shape[0]))
-    output_list = np.zeros((num_folds, X_test.shape[0], num_classes))
+    train_output_list = np.zeros((X.shape[0], num_classes))
+    test_output_list = np.zeros((num_folds, X_test.shape[0], num_classes))
 
-    ### testデータを算出 ####################################
-
-    # skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
-    # f1_list = np.zeros(num_folds)
-    # oof = np.zeros(len(y))
-    # for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
-    #     print(f"------------------------------ fold {fold} ------------------------------")
-
-    #     X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
-    #     _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
-
-    #     # 出力
-    #     output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
-
-    # print("CV: {}".format(np.mean(f1_list)))
-
-    # # 平均値
-    # y_out = np.mean(output_list, axis=0)
-
-    # # 最終予測
-    # y_preds = np.argmax(y_out, axis=1)
-    # # print(y_preds)
-    # # print(y_preds.shape)
-
-    ####################################################
-
-    # 性能確認
-    # calc_loo_cv_score(model, X, y)
-
-    # visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/SMOTE/up/", y)
-
-    #　trainデータ読み込み
-    datapath = "Data/"
-    df_train = pd.read_csv(datapath+"train_m.csv")
-    X, y = preprocess(df_train)
-
-    output_list = np.zeros((num_folds, X_test.shape[0], num_classes))
     ### testデータを算出 ####################################
 
     skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
@@ -333,15 +300,30 @@ if __name__ == '__main__':
         print(f"------------------------------ fold {fold} ------------------------------")
 
         X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
-        _, oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+        train_output_list[indexes_val], oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
 
         # 出力
-        output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
+        test_output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
 
     print("CV: {}".format(np.mean(f1_list)))
 
+    # cm = confusion_matrix(y, oof)
+    # cmp = ConfusionMatrixDisplay(cm, display_labels=[str(i) for i in range(11)])
+    # cmp.plot(cmap=plt.cm.Blues)
+    # plt.savefig("cm.png", bbox_inches='tight')
+
+    # share(df_train, train_output_list)
+    # print(train_output_list)
+    # df_share = pd.DataFrame(data=train_output_list, columns=['NN_'+str(i) for i in range(num_classes)])
+    # df_share.to_csv("Submit/NN_1.csv")
+
     # 平均値
-    y_out = np.mean(output_list, axis=0)
+    y_out = np.mean(test_output_list, axis=0)
+
+    print(y_out.shape)
+    print(y_out)
+    df_share_test = pd.DataFrame(data=y_out, columns=['NN_'+str(i) for i in range(num_classes)])
+    df_share_test.to_csv("Share/NN_tuning_test_softmax.csv")
 
     # 最終予測
     y_preds = np.argmax(y_out, axis=1)
@@ -353,6 +335,6 @@ if __name__ == '__main__':
     # 可視化
     # visualize(X, y)
     # visualize_with_model_list(model_list, X_test, y_preds, "Results/SMOTE/test/")
-    visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/downup/", y)
+    # visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/downup/", y)
     # visualize_with_model_list(model_list, X_val, oof[indexes_val].astype(np.int), y_val)
-    print(confusion_matrix(y, oof.astype(np.int)))
+    # print(confusion_matrix(y, oof.astype(np.int)))

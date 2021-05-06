@@ -299,15 +299,15 @@ if __name__ == '__main__':
     num_classes = 11
     num_folds = 4
 
-    model_1st_list = [L2Softmax(data_dim, 3) for i in range(num_folds)]
-    model_1st_path_list = ['Model/NN_step/L2Softmax_1st_' + str(i) + '.pth' for i in range(num_folds)]
-    # model_1st_list = [NN(data_dim, num_classes) for i in range(num_folds)]
-    # model_1st_path_list = ['Model/NN/NN_down_' + str(i) + '.pth' for i in range(num_folds)]
+    # model_1st_list = [L2Softmax(data_dim, 3) for i in range(num_folds)]
+    # model_1st_path_list = ['Model/NN_step/L2Softmax_1st_' + str(i) + '.pth' for i in range(num_folds)]
+    model_1st_list = [NN(data_dim, 3) for i in range(num_folds)]
+    model_1st_path_list = ['Model/NN_step/NN_1st_' + str(i) + '.pth' for i in range(num_folds)]
 
-    model_2nd_list = [L2Softmax(data_dim, 9) for i in range(num_folds)]
-    model_2nd_path_list = ['Model/NN_step/L2Softmax_2nd_' + str(i) + '.pth' for i in range(num_folds)]
-    # model_2nd_list = [NN(data_dim, num_classes) for i in range(num_folds)]
-    # model_2nd_path_list = ['Model/NN/NN_down_' + str(i) + '.pth' for i in range(num_folds)]
+    # model_2nd_list = [L2Softmax(data_dim, 9) for i in range(num_folds)]
+    # model_2nd_path_list = ['Model/NN_step/L2Softmax_2nd_' + str(i) + '.pth' for i in range(num_folds)]
+    model_2nd_list = [NN(data_dim, 9) for i in range(num_folds)]
+    model_2nd_path_list = ['Model/NN_step/NN_2nd_' + str(i) + '.pth' for i in range(num_folds)]
 
     # 最適アルゴリズム
     lr = 0.001
