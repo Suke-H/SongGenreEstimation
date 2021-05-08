@@ -177,7 +177,6 @@ class EarlyStopping:
             if self.counter >= self.patience:  #設定カウントを上回ったらストップフラグをTrueに変更
                 self.early_stop = True
         else:  #ベストスコアを更新した場合
-            print("f1_score={}". format(f1_score))
             self.best_score = score  #ベストスコアを上書き
             self.checkpoint(val_loss, model)  #モデルを保存してスコア表示
             self.counter = 0  #ストップカウンタリセット
@@ -188,4 +187,3 @@ class EarlyStopping:
             print(f'{self.param_name} decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}) on {self.counter} out of {self.patience}.  Saving model ...')
         torch.save(model.state_dict(), self.path)  #ベストモデルを指定したpathに保存
         self.val_loss_min = val_loss  #その時のlossを記録する
-

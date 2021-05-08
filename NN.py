@@ -8,17 +8,11 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, f1_score, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import StratifiedKFold
 import pandas as pd
-from tqdm import tqdm
-import pyarrow as pa
-from time import time
 import random
 from collections import Counter
-from imblearn.over_sampling import SMOTE
 from matplotlib import pyplot as plt
 
 from models import NN, L2Softmax, EarlyStopping, L2Softmax_tuning
-from vis import loss_plot, acc_plot, visualize, visualize_with_model, visualize_with_model_list
-from SMOTE import PreProcess
 
 def mean_norm(df):
     """ 標準化 """
@@ -61,40 +55,6 @@ def make_dataloader(X, y, batch_size):
 
     return dataloader
 
-def make_under_sampling_dataloader(X, y, batch_size):
-    """ 8と10を半分削ったDataloader作成 """
-
-    indices_8, indices_10 = np.where(y == 8)[0], np.where(y == 10)[0]
-    perm_8, perm_10 = np.random.permutation(len(indices_8) // 2), np.random.permutation(len(indices_10) // 2)
-    delete_8, delete_10 = indices_8[perm_8], indices_10[perm_10]
-    X_tmp, y_tmp = np.delete(X, delete_8, axis=0), np.delete(y, delete_8)
-    X_tmp, y_tmp = np.delete(X_tmp, delete_10, axis=0), np.delete(y_tmp, delete_10)
-
-    dataset = data.TensorDataset(torch.from_numpy(X_tmp), torch.from_numpy(y_tmp))
-    dataloader = data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
-
-    return dataloader
-
-def make_downup_sampling_dataloader(X, y, batch_size):
-    """ 8と10を半分削る->SMOTEで全クラス同じ数になるようオーバーサンプリング->Dataloader作成 """
-
-    # down
-    indices_8, indices_10 = np.where(y == 8)[0], np.where(y == 10)[0]
-    perm_8, perm_10 = np.random.permutation(len(indices_8) // 2), np.random.permutation(len(indices_10) // 2)
-    delete_8, delete_10 = indices_8[perm_8], indices_10[perm_10]
-    X_tmp, y_tmp = np.delete(X, delete_8, axis=0), np.delete(y, delete_8)
-    X_tmp, y_tmp = np.delete(X_tmp, delete_10, axis=0), np.delete(y_tmp, delete_10)
-
-    # up
-    sm = SMOTE()
-    X_up, y_up = sm.fit_resample(X_tmp, y_tmp)
-    print(sorted(Counter(y_up).items()))
-
-    dataset = data.TensorDataset(torch.from_numpy(X_up), torch.from_numpy(y_up))
-    dataloader = data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
-
-    return dataloader
-
 def set_seed(seed=42):
     random.seed(seed)
     np.random.seed(seed)
@@ -104,7 +64,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-def calc_loo_cv_score(model, X, y=None):  # leave-one-out
+def predict_NN(model, X, y=None):  # leave-one-out
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     model, X = model.to(device), torch.from_numpy(X).to(device)
     model.eval() # 推論モードに
@@ -126,8 +86,8 @@ def calc_loo_cv_score(model, X, y=None):  # leave-one-out
     else:
         score = f1_score(y, preds, average="macro")
         print(f"f1_score={score}\n")
-        print(classification_report(y, preds))
-        print(confusion_matrix(y, preds))
+        # print(classification_report(y, preds))
+        # print(confusion_matrix(y, preds))
 
         return outputs, preds, score
     
@@ -139,7 +99,7 @@ def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epoch
     model = model.to(device)
 
     # earlystoppingインスタンス
-    earlystopping = EarlyStopping(patience=300, verbose=True, path=path, param_name="validation loss")
+    earlystopping = EarlyStopping(patience=300, verbose=False, path=path, param_name="f1 macro")
 
     # lossやaccのプロット用
     history = {"train_loss": [], "val_loss": [], "train_acc": [], "val_acc": [], "f1_macro": []}
@@ -151,8 +111,6 @@ def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epoch
         epoch_loss = epoch_corrects = total = 0
 
         dataloader = make_dataloader(X_train, y_train, 100)
-        # dataloader = make_under_sampling_dataloader(X_train, y_train, 100)
-        # dataloader = make_under_sampling_dataloader(X_train, y_train, 100)
 
         # データローダーからミニバッチを取り出すループ
         for inputs, labels in dataloader:
@@ -212,13 +170,6 @@ def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epoch
             print("Early Stopping on {} epoch.".format(epoch))
             break
 
-        if (epoch+1) % 100 == 0:
-            print('epoch: {}, train_loss: {:.4f}, train_acc: {:.4f}, val_loss: {:.4f}, val_acc: {:.4f}, f1 macro: {:.4f}'\
-                .format(epoch, epoch_loss, epoch_acc, val_loss, val_acc, f1_macro))
-
-    # loss_plot(history["loss"])
-    # acc_plot(history["acc"])
-
 def fix_seed(seed):
     # random
     random.seed(seed)
@@ -231,59 +182,36 @@ def fix_seed(seed):
     # Tensorflow
     # tf.random.set_seed(seed)
 
-if __name__ == '__main__':
+def run_NN(df_train, df_test):
 
     SEED = 42
     fix_seed(SEED)
 
-    #　trainデータ読み込み
-    datapath = "Data/"
-    df_train = pd.read_csv(datapath+"train_m.csv")
+    #　trainデータ前処理
     X, y = preprocess(df_train)
 
-    ### LOF + SMOTE  #################################
-    # X, y = PreProcess()
-
-    # np.save(datapath+"X_up", X)
-    # np.save(datapath+"y_up", y)
-
-    # X = np.load(datapath+"X_up.npy")
-    # y = np.load(datapath+"y_up.npy")
-    ##################################################
-
-    # モデル呼び出し
+    # 設定
     data_dim = X.shape[1]
     num_classes = 11
     num_folds = 4
 
-    # model_list = [L2Softmax(data_dim, num_classes) for i in range(num_folds)]
-    # model_path_list = ['Model/NN/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
-    # model_list = [NN(data_dim, num_classes) for i in range(num_folds)]
-    # model_path_list = ['Model/NN/NN_down_' + str(i) + '.pth' for i in range(num_folds)]
-
-    # num_layers = 4
-    # num_units = [800, 700, 700, 300]
-    # dropouts = [0.5, 0, 0.3, 0.2]
-
+    # ハイパーパラメータ
     num_layers = 3
     num_units = [200, 600, 400]
     dropouts = [0.3, 0.3, 0.1]
     alpha = 32
 
+    # モデル呼び出し
     model_list = [L2Softmax_tuning(data_dim, num_classes, num_layers, num_units, dropouts, alpha) for i in range(num_folds)]
-    model_path_list = ['Model/tuning/L2Softmax_noleak' + str(i) + '.pth' for i in range(num_folds)]
+    model_path_list = ['Model/NN_' + str(i) + '.pth' for i in range(num_folds)]
 
     # 最適アルゴリズム
-    # adam_lr = 0.00061
-    # weight_decay = 5.8342*10**(-6)
     adam_lr = 0.00035338
-    weight_decay = 4.1524e-09
+    weight_decay = 0
     optimizer_list = [optim.Adam(model_list[i].parameters(), lr=adam_lr, weight_decay=weight_decay) for i in range(num_folds)]
-    # optimizer_list = [optim.RMSprop(model_list[i].parameters()) for i in range(num_folds)]
 
     # 損失関数
     criterion = nn.CrossEntropyLoss(reduction='mean')
-    # criterion = SelfAdjDiceLoss()
 
     # 学習回数
     num_epochs = 100000
@@ -300,21 +228,20 @@ if __name__ == '__main__':
         X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
 
         # 学習
-        train(model_list[fold], X_train, y_train, X_val, y_val, optimizer_list[fold], criterion, num_epochs, model_path_list[fold])
+        train(model_list[fold], X_train, y_train, X_val, y_val, \
+                optimizer_list[fold], criterion, num_epochs, model_path_list[fold])
 
         # 各foldのvalidationデータの推定結果を合体させて、最終出力とする
-        output_list[indexes_val], oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+        output_list[indexes_val], oof[indexes_val], f1_list[fold] = predict_NN(model_list[fold], X_val, y_val)
 
     print("CV: {}".format(np.mean(f1_list)))
-
     ####################################################
 
     # モデル呼び出し
     for i in range(num_folds):
         model_list[i].load_state_dict(torch.load(model_path_list[i]))
 
-    # testデータ読み込み
-    df_test = pd.read_csv(datapath+"test_m.csv")
+    # testデータ前処理
     X_test = preprocess_test(df_test)
 
     # pred_list = np.zeros((num_folds, X_test.shape[0]))
@@ -322,7 +249,6 @@ if __name__ == '__main__':
     test_output_list = np.zeros((num_folds, X_test.shape[0], num_classes))
 
     ### testデータを算出 ####################################
-
     skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
     f1_list = np.zeros(num_folds)
     oof = np.zeros(len(y))
@@ -330,41 +256,39 @@ if __name__ == '__main__':
         print(f"------------------------------ fold {fold} ------------------------------")
 
         X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
-        train_output_list[indexes_val], oof[indexes_val], f1_list[fold] = calc_loo_cv_score(model_list[fold], X_val, y_val)
+        train_output_list[indexes_val], oof[indexes_val], f1_list[fold] = predict_NN(model_list[fold], X_val, y_val)
 
         # 出力
-        test_output_list[fold], _ = calc_loo_cv_score(model_list[fold], X_test)
+        test_output_list[fold], _ = predict_NN(model_list[fold], X_test)
 
     print("CV: {}".format(np.mean(f1_list)))
 
-    cm = confusion_matrix(y, oof)
-    cmp = ConfusionMatrixDisplay(cm, display_labels=[str(i) for i in range(11)])
-    cmp.plot(cmap=plt.cm.Blues)
-    plt.savefig("images/cm2.png", bbox_inches='tight')
-
-    # share(df_train, train_output_list)
-    # print(train_output_list)
-    df_share = pd.DataFrame(data=train_output_list, columns=['NN_'+str(i) for i in range(num_classes)])
-    df_share.to_csv("Submit/L2_tuning_train.csv")
+    # 再現性チェック用
+    # cm = confusion_matrix(y, oof)
+    # cmp = ConfusionMatrixDisplay(cm, display_labels=[str(i) for i in range(11)])
+    # cmp.plot(cmap=plt.cm.Blues)
+    # plt.savefig("images/cm6.png", bbox_inches='tight')
 
     # 平均値
     y_out = np.mean(test_output_list, axis=0)
 
-    print(y_out.shape)
-    print(y_out)
+    # dfに変換
+    df_share_train = pd.DataFrame(data=train_output_list, columns=['NN_'+str(i) for i in range(num_classes)])
+    df_share_train.index = [i for i in range(4046)]
+
     df_share_test = pd.DataFrame(data=y_out, columns=['NN_'+str(i) for i in range(num_classes)])
-    df_share_test.to_csv("Share/L2_tuning_test.csv")
+    df_share_test.index = [i+4046 for i in range(4046)]
 
     # 最終予測
-    y_preds = np.argmax(y_out, axis=1)
-    # print(y_preds)
-    # print(y_preds.shape)
+    y_preds_train = np.argmax(train_output_list, axis=1)
+    y_preds_test = np.argmax(y_out, axis=1)
 
-    ####################################################
+    return df_share_train, df_share_test
 
-    # 可視化
-    # visualize(X, y)
-    # visualize_with_model_list(model_list, X_test, y_preds, "Results/SMOTE/test/")
-    # visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/downup/", y)
-    visualize_with_model_list(model_list, X_val, oof[indexes_val].astype(np.int), "Results/tuning/", y_val)
-    # print(confusion_matrix(y, oof.astype(np.int)))
+if __name__ == '__main__':
+    train_df = pd.read_csv("Data/train_m.csv")
+    test_df = pd.read_csv("Data/test_m.csv")
+    train_pred, test_pred = run_NN(train_df, test_df)
+
+    print(train_pred.shape)
+    print(test_pred.shape)
