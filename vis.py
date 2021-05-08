@@ -77,17 +77,17 @@ def scatter_plot2(X, y_pred, y_true, path, name):
     for label in np.unique(y_pred):
         
         # 8, 10はスキップ
-        # if label in [8, 10]:
-        #     continue
+        if label in [8, 10]:
+            continue
 
         # 正解・不正解で場合分け
 
         # (色は推定ラベル)
-        indices_correct = np.where((y_pred == label) & (indices_TF == 1))[0]
-        indices_wrong = np.where((y_pred == label) & (indices_TF == 0))[0]
+        # indices_correct = np.where((y_pred == label) & (indices_TF == 1))[0]
+        # indices_wrong = np.where((y_pred == label) & (indices_TF == 0))[0]
         # (色は正解ラベル)
-        # indices_correct = np.where((y_true == label) & (indices_TF == 1))[0]
-        # indices_wrong = np.where((y_true == label) & (indices_TF == 0))[0]
+        indices_correct = np.where((y_true == label) & (indices_TF == 1))[0]
+        indices_wrong = np.where((y_true == label) & (indices_TF == 0))[0]
 
         print("label: {}, correct: {}, wrong: {}".format(label, len(indices_correct), len(indices_wrong)))
         

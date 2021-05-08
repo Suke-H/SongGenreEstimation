@@ -105,7 +105,7 @@ class L2Softmax(torch.nn.Module):
         # return x
 
 class L2Softmax_tuning(nn.Module):
-    def __init__(self, data_dim, num_classes, num_layers, num_units, dropouts):
+    def __init__(self, data_dim, num_classes, num_layers, num_units, dropouts, alpha):
         super(L2Softmax_tuning, self).__init__()
 
         # 活性化関数
@@ -127,7 +127,7 @@ class L2Softmax_tuning(nn.Module):
         # 最終層
         self.fc_last = nn.Linear(pre_units, num_classes)
 
-        self.alpha = 16
+        self.alpha = alpha
 
     def forward(self, x):
 

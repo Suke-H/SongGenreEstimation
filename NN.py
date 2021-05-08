@@ -11,6 +11,7 @@ import pandas as pd
 from tqdm import tqdm
 import pyarrow as pa
 from time import time
+import random
 from collections import Counter
 from imblearn.over_sampling import SMOTE
 from matplotlib import pyplot as plt
@@ -93,6 +94,15 @@ def make_downup_sampling_dataloader(X, y, batch_size):
     dataloader = data.DataLoader(dataset=dataset, batch_size=batch_size, shuffle=False)
 
     return dataloader
+
+def set_seed(seed=42):
+    random.seed(seed)
+    np.random.seed(seed)
+    os.environ["PYTHONHASHSEED"] = str(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 def calc_loo_cv_score(model, X, y=None):  # leave-one-out
     device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -209,8 +219,22 @@ def train(model, X_train, y_train, X_val, y_val, optimizer, criterion, num_epoch
     # loss_plot(history["loss"])
     # acc_plot(history["acc"])
 
+def fix_seed(seed):
+    # random
+    random.seed(seed)
+    # Numpy
+    np.random.seed(seed)
+    # Pytorch
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    # Tensorflow
+    # tf.random.set_seed(seed)
 
 if __name__ == '__main__':
+
+    SEED = 42
+    fix_seed(SEED)
 
     #　trainデータ読み込み
     datapath = "Data/"
@@ -237,16 +261,23 @@ if __name__ == '__main__':
     # model_list = [NN(data_dim, num_classes) for i in range(num_folds)]
     # model_path_list = ['Model/NN/NN_down_' + str(i) + '.pth' for i in range(num_folds)]
 
-    num_layers = 4
-    num_units = [800, 700, 700, 300]
-    dropouts = [0.5, 0, 0.3, 0.2]
+    # num_layers = 4
+    # num_units = [800, 700, 700, 300]
+    # dropouts = [0.5, 0, 0.3, 0.2]
 
-    model_list = [L2Softmax_tuning(data_dim, num_classes, num_layers, num_units, dropouts) for i in range(num_folds)]
-    model_path_list = ['Model/tuning/L2Softmax_' + str(i) + '.pth' for i in range(num_folds)]
+    num_layers = 3
+    num_units = [200, 600, 400]
+    dropouts = [0.3, 0.3, 0.1]
+    alpha = 32
+
+    model_list = [L2Softmax_tuning(data_dim, num_classes, num_layers, num_units, dropouts, alpha) for i in range(num_folds)]
+    model_path_list = ['Model/tuning/L2Softmax_noleak' + str(i) + '.pth' for i in range(num_folds)]
 
     # 最適アルゴリズム
-    adam_lr = 0.00061
-    weight_decay = 5.8342*10**(-6)
+    # adam_lr = 0.00061
+    # weight_decay = 5.8342*10**(-6)
+    adam_lr = 0.00035338
+    weight_decay = 4.1524e-09
     optimizer_list = [optim.Adam(model_list[i].parameters(), lr=adam_lr, weight_decay=weight_decay) for i in range(num_folds)]
     # optimizer_list = [optim.RMSprop(model_list[i].parameters()) for i in range(num_folds)]
 
@@ -306,15 +337,15 @@ if __name__ == '__main__':
 
     print("CV: {}".format(np.mean(f1_list)))
 
-    # cm = confusion_matrix(y, oof)
-    # cmp = ConfusionMatrixDisplay(cm, display_labels=[str(i) for i in range(11)])
-    # cmp.plot(cmap=plt.cm.Blues)
-    # plt.savefig("cm.png", bbox_inches='tight')
+    cm = confusion_matrix(y, oof)
+    cmp = ConfusionMatrixDisplay(cm, display_labels=[str(i) for i in range(11)])
+    cmp.plot(cmap=plt.cm.Blues)
+    plt.savefig("images/cm2.png", bbox_inches='tight')
 
     # share(df_train, train_output_list)
     # print(train_output_list)
-    # df_share = pd.DataFrame(data=train_output_list, columns=['NN_'+str(i) for i in range(num_classes)])
-    # df_share.to_csv("Submit/NN_1.csv")
+    df_share = pd.DataFrame(data=train_output_list, columns=['NN_'+str(i) for i in range(num_classes)])
+    df_share.to_csv("Submit/L2_tuning_train.csv")
 
     # 平均値
     y_out = np.mean(test_output_list, axis=0)
@@ -322,7 +353,7 @@ if __name__ == '__main__':
     print(y_out.shape)
     print(y_out)
     df_share_test = pd.DataFrame(data=y_out, columns=['NN_'+str(i) for i in range(num_classes)])
-    df_share_test.to_csv("Share/NN_tuning_test_softmax.csv")
+    df_share_test.to_csv("Share/L2_tuning_test.csv")
 
     # 最終予測
     y_preds = np.argmax(y_out, axis=1)
@@ -335,5 +366,5 @@ if __name__ == '__main__':
     # visualize(X, y)
     # visualize_with_model_list(model_list, X_test, y_preds, "Results/SMOTE/test/")
     # visualize_with_model_list(model_list, X, oof.astype(np.int), "Results/downup/", y)
-    # visualize_with_model_list(model_list, X_val, oof[indexes_val].astype(np.int), y_val)
+    visualize_with_model_list(model_list, X_val, oof[indexes_val].astype(np.int), "Results/tuning/", y_val)
     # print(confusion_matrix(y, oof.astype(np.int)))
