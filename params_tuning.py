@@ -46,10 +46,10 @@ def make_dataloader(X, y, batch_size):
 
 ### モデルの定義 ##########################################
 
-class Net(nn.Module):
+class Net_1(nn.Module):
     def __init__(self, data_dim, num_classes, \
-                    trial, num_layers, num_units, dropouts):
-        super(Net, self).__init__()
+                    trial, num_layers, num_units, dropouts, alpha):
+        super(Net_1, self).__init__()
 
         # 活性化関数
         # self.activation = get_activation(trial)
@@ -70,7 +70,8 @@ class Net(nn.Module):
         # 最終層
         self.fc_last = nn.Linear(pre_units, num_classes)
 
-        self.alpha = 16
+        # alpha
+        self.alpha = alpha
 
     def forward(self, x):
 
@@ -87,6 +88,67 @@ class Net(nn.Module):
 
         # 最終層
         x = self.fc_last(feature)
+
+        return x, feature
+
+class Net_2(nn.Module):
+    def __init__(self, data_dim, num_classes, num_first_layers, num_first_units, dropout_first, \
+                num_last_layers, num_last_units, dropout_last, alpha):
+        super(Net_2, self).__init__()
+
+        # 活性化関数
+        self.activation = F.relu
+
+        # 最初のFC層
+        self.fc_first = nn.ModuleList([])
+        pre_units = data_dim
+        for i in range(num_first_layers):
+            self.fc_first.append(nn.Linear(pre_units, num_first_units[i]))
+            pre_units = num_first_units[i]
+
+        # 最初のDrouout
+        self.dropout_first = nn.ModuleList([])
+        for i in range(num_first_layers):
+            self.dropout_first.append(nn.Dropout(p=dropout_first[i]))
+
+        # 最後のFC層
+        self.fc_last = nn.ModuleList([])
+        for i in range(num_last_layers):
+            self.fc_last.append(nn.Linear(pre_units, num_last_units[i]))
+            pre_units = num_last_units[i]
+
+        # 最後のDrouout
+        self.dropout_last = nn.ModuleList([])
+        for i in range(num_last_layers):
+            self.dropout_last.append(nn.Dropout(p=dropout_last[i]))
+
+        self.alpha = alpha
+
+        # 最終層
+        self.fc_output = nn.Linear(pre_units, num_classes)
+
+    def forward(self, x):
+
+        # 最初のFC層
+        for (f, d) in zip(self.fc_first, self.dropout_first):
+            x = f(x)
+            x = self.activation(x)
+            x = d(x)
+
+        # L2softmax層
+        l2 = torch.sqrt((x**2).sum()) 
+        feature = self.alpha * (x / l2)
+
+        x = feature.clone().detach()
+
+        # 最後のFC層
+        for (f, d) in zip(self.fc_last, self.dropout_last):
+            x = f(x)
+            x = self.activation(x)
+            x = d(x)
+
+        # 最終層
+        x = self.fc_output(x)
 
         return x, feature
 
@@ -154,7 +216,7 @@ def get_optimizer(trial, model):
 
 ### パラメータチューニング用の目的関数 #############################
 
-def objective(trial):
+def objective_1(trial):
 
     EPOCH = 50 # 学習試行数
     data_dim = X.shape[1]
@@ -167,16 +229,23 @@ def objective(trial):
     num_layers = trial.suggest_int('num_layers', 3, 7)
 
     # FC層のユニット数
-    num_units = [int(trial.suggest_discrete_uniform("num_units_"+str(i), 100, 1000, 100)) for i in range(num_layers)]
+    num_units = [int(trial.suggest_discrete_uniform("num_units_"+str(i), 100, 1000, 100))\
+                 for i in range(num_layers)]
 
     # Dropoutの確率
     dropouts = [trial.suggest_discrete_uniform("dropout_"+str(i), 0, 0.5, 0.1) for i in range(num_layers)]
 
-    model = Net(data_dim, num_classes, trial, num_layers, num_units, dropouts).to(device)
+    # alpha
+    alpha = trial.suggest_int('alpha', 8, 32, 4)
+
+    # model = Net(data_dim, num_classes, trial, num_layers, num_units, dropouts).to(device)
+    model_list = [Net_1(data_dim, num_classes, trial, num_layers, num_units, dropouts, alpha).to(device)\
+                     for i in range(num_folds)]
     # summary(model, input_size=(X.shape[1], ))
 
     # 最適アルゴリズム
-    optimizer = get_optimizer(trial, model)
+    # optimizer = get_optimizer(trial, model)
+    optimizer_list = [get_optimizer(trial, model_list[i]) for i in range(num_folds)]
 
     # 損失関数
     criterion = nn.CrossEntropyLoss(reduction='mean')
@@ -190,7 +259,65 @@ def objective(trial):
 
         # 学習
         for step in range(EPOCH):
-            f1_list[fold] = train(model, X_train, y_train, X_val, y_val, optimizer, criterion, EPOCH)
+            f1_list[fold] = train(model_list[fold], X_train, y_train, X_val, y_val, \
+                                    optimizer_list[fold], criterion, EPOCH)
+
+    return np.mean(f1_list)
+
+def objective_2(trial):
+
+    EPOCH = 50 # 学習試行数
+    data_dim = X.shape[1]
+    num_classes = 11
+    num_folds = 4
+
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    # 最初のFC層の数
+    num_first_layers = trial.suggest_int('num_first_layers', 3, 7)
+
+    # 最初のFC層のユニット数
+    num_first_units = [int(trial.suggest_discrete_uniform("num_first_units_"+str(i), 100, 1000, 100)) for i in range(num_first_layers)]
+
+    # 最初のDropoutの確率
+    dropout_first = [trial.suggest_discrete_uniform("dropout_first_"+str(i), 0, 0.5, 0.1) for i in range(num_first_layers)]
+
+    # 最後のFC層の数
+    num_last_layers = trial.suggest_int('num_last_layers', 0, 2)
+
+    # 最後のFC層のユニット数
+    num_last_units = [int(trial.suggest_discrete_uniform("num_last_units_"+str(i), 50, 500, 50)) for i in range(num_last_layers)]
+
+    # 最後のDropoutの確率
+    dropout_last = [trial.suggest_discrete_uniform("dropout_last_"+str(i), 0, 0.5, 0.1) for i in range(num_last_layers)]
+
+    # alpha
+    alpha = trial.suggest_int('alpha', 8, 32, 4)
+
+    # モデル定義
+    # model = Net_2(data_dim, num_classes, num_first_layers, num_first_units, dropout_first, \
+    #                 num_last_layers, num_last_units, dropout_last, alpha).to(device) 
+    model_list = [Net_2(data_dim, num_classes, num_first_layers, num_first_units, dropout_first, \
+                    num_last_layers, num_last_units, dropout_last, alpha).to(device) for i in range(num_folds)]
+    # summary(model, input_size=(X.shape[1], ))
+
+    # 最適アルゴリズム
+    # optimizer = get_optimizer(trial, model)
+    optimizer_list = [get_optimizer(trial, model_list[i]) for i in range(num_folds)]
+
+    # 損失関数
+    criterion = nn.CrossEntropyLoss(reduction='mean')
+
+    ### 学習（StratifiedKFoldを使用）#################################
+    skf = StratifiedKFold(n_splits=num_folds, shuffle=True, random_state=15)
+    f1_list = np.zeros(num_folds)
+
+    for fold, (indexes_trn, indexes_val) in enumerate(skf.split(X, y)):
+        X_train, y_train, X_val, y_val = X[indexes_trn], y[indexes_trn], X[indexes_val], y[indexes_val]
+
+        # 学習
+        for step in range(EPOCH):
+            f1_list[fold] = train(model_list[fold], X_train, y_train, X_val, y_val, optimizer_list[fold], criterion, EPOCH)
 
     return np.mean(f1_list)
 
@@ -204,9 +331,10 @@ if __name__ == '__main__':
     # チューニング開始
     start = time()
 
-    TRIAL_SIZE = 100 # チューニング試行数
+    TRIAL_SIZE = 300 # チューニング試行数
     study = optuna.create_study()
-    study.optimize(objective, n_trials=TRIAL_SIZE)
+    study.optimize(objective_1, n_trials=TRIAL_SIZE)
+    # study.optimize(objective_2, n_trials=TRIAL_SIZE)
     print(study.best_params)
 
     end = time()

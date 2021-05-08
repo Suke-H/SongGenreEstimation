@@ -1,35 +1,20 @@
-import torch
-import torch.nn as nn
-import torch.utils.data as data
-import torch.optim as optim
-
 import numpy as np
-from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, f1_score, confusion_matrix, ConfusionMatrixDisplay
 from sklearn.model_selection import StratifiedKFold
 import pandas as pd
-from tqdm import tqdm
-import pyarrow as pa
-from time import time
-from collections import Counter
-from imblearn.over_sampling import SMOTE
-from matplotlib import pyplot as plt
 
-datapath = "Data/ensemble/"
-honda_train = pd.read_csv(datapath+"NN_train_softmax.csv").drop(['index'], axis=1).values
-# df_honda_test = pd.read_csv(datapath+"NN_test_softmax.csv")
-matsuda_train = pd.read_csv(datapath+"pred_train.csv").values
-# df_matsuda_test = pd.read_csv(datapath+"pred_test.csv")
-# honda_train = pd.read_csv(datapath+"NN_train_softmax.csv").values
-# honda_test = pd.read_csv(datapath+"NN_test_softmax.csv").values
-# matsuda_train = pd.read_csv(datapath+"pred_train.csv").values
-matsuda_test = pd.read_csv(datapath+"pred_test.csv").values
+def target_encoding_count(df, index, columns):
+    df_pivot = df.groupby([index, *columns]).count().iloc[:, 0].reset_index().pivot(index=columns, columns=index).fillna(0)
+    columns.remove(index)
+    name = '_'.join(columns)
+    df_pivot.rename(columns=lambda x:str(index)+str(x)+f'_groupby{name}', inplace = True)
+    df_pivot.columns = [i[1] for i in df_pivot.columns]
+    return df_pivot.reset_index()
 
-# print(matsuda_train)
-# print(matsuda_train.shape)
-print(matsuda_test)
-print(matsuda_test.shape)
-# print(honda_train)
-# print(honda_train.shape)
+#　trainデータ読み込み
+datapath = "Data/"
+df_train = pd.read_csv(datapath+"train_m.csv")
 
+pivot1 = target_encoding_count(df_train, 'genre', ['region'])
+print(pivot1)
 
